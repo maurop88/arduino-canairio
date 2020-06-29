@@ -1,7 +1,6 @@
-#include <hpma115s0.h>
-#include <DHTesp.h>
 #include <ESP8266WiFi.h>
 #include <SoftwareSerial.h>
+#include <DHTesp.h>
 #include <numeric>
 #include <vector>
 #include "CanAirIoApi.hpp"
@@ -34,7 +33,6 @@ unsigned int instantTemperature = 0;
 
 CanAirIoApi api(DEBUG);
 SoftwareSerial hpmaSerial(HPMA_PIN_RX, HPMA_PIN_TX);
-HPMA115S0 hpmaSensor(hpmaSerial);
 DHTesp dhtSensor;
 
 /******************************************************************************
@@ -42,16 +40,17 @@ DHTesp dhtSensor;
 ******************************************************************************/
 
 void setup() {
-  if (DEBUG) Serial.println("Starting Setup");
-  
-  delay(1000);
-
   Serial.begin(115200); Serial.println();
   hpmaSerial.begin(9600); hpmaSerial.println();
   
+  delay(1000);
+
+  if (DEBUG) Serial.println("Starting Setup");
+
   wifiInit();
   apiInit();
   sensorsInit();
+
 }
 
 void wifiInit() {
@@ -79,11 +78,10 @@ void apiInit() {
 void sensorsInit() {
   if (DEBUG) Serial.println("Initializing HPMA and DHT");
 
-  hpmaSensor.stop_autosend();
-  hpmaSensor.start_measurement();
-
+  stopHpmaAutosend();
+  startHpmaMeasurement();
   dhtSensor.setup(DHT_PIN, DHTesp::DHT11);
-  delay(2000);
+  delay(3000);
 
   if (DEBUG) Serial.println("OK!");
 }
@@ -111,13 +109,13 @@ void loop() {
 }
 
 void readPM() {
-  float p25;
-  float p10;
+  unsigned int pm25 = 0;
+  unsigned int pm10 = 0;
 
-  if (hpmaSensor.read(&p25,&p10) == 1) {
-    vectorInstant25.push_back((int)p25);
-    vectorInstant10.push_back((int)p10);
-    if (DEBUG) Serial.println("PM25=" + String(p25) + " PM10=" + String(p10));
+  if (readHpmaSensor(&pm25, &pm10)) {
+    vectorInstant25.push_back(pm25);
+    vectorInstant10.push_back(pm10);
+    if (DEBUG) Serial.println("PM25=" + String(pm25) + " PM10=" + String(pm10));
   } else {
     Serial.println("Measurement fail");
   } 
@@ -138,8 +136,8 @@ boolean calculatePmAverage() {
 }
 
 void readHT() {
-  instantTemperature = dhtSensor.getTemperature();
   instantHumidity = dhtSensor.getHumidity();
+  instantTemperature = dhtSensor.getTemperature();
   if (DEBUG) Serial.println("Temperature=" + String(instantTemperature) + " Humidity=" + String(instantHumidity));
 }
 
@@ -161,5 +159,80 @@ void sendToApi() {
     if (DEBUG) Serial.println("OK! " + String(code));
   } else {
     if (DEBUG) Serial.println("FAIL! " + String(code));
+  }
+}
+
+
+/******************************************************************************
+*   HPMA Methods (From electronza's library)
+******************************************************************************/
+
+bool stopHpmaAutosend() {
+  byte stop_autosend[] = {0x68, 0x01, 0x20, 0x77 };
+  hpmaSerial.write(stop_autosend, sizeof(stop_autosend));
+
+  while (hpmaSerial.available() < 2);
+  byte read1 = hpmaSerial.read();
+  byte read2 = hpmaSerial.read();
+  
+  if ((read1 == 0xA5) && (read2 == 0xA5)){
+    return true; //ACK
+  } 
+  return false;
+}
+
+bool startHpmaMeasurement(){
+  byte start_measurement[] = {0x68, 0x01, 0x01, 0x96 };
+  hpmaSerial.write(start_measurement, sizeof(start_measurement));
+  
+  while (hpmaSerial.available() < 2);
+  byte read1 = hpmaSerial.read();
+  byte read2 = hpmaSerial.read();
+  
+  if ((read1 == 0xA5) && (read2 == 0xA5)){
+    return true; //ACK
+  }
+  return false;
+}
+
+bool readHpmaSensor(unsigned int *pm25,unsigned int *pm10) {
+  byte read_particle[] = {0x68, 0x01, 0x04, 0x93 };
+  hpmaSerial.write(read_particle, sizeof(read_particle));
+
+  while (hpmaSerial.available() < 1);
+  byte HEAD = hpmaSerial.read();
+  
+  while (hpmaSerial.available() < 1);
+  byte LEN = hpmaSerial.read();
+
+  if ((HEAD == 0x96) && (LEN == 0x96)){
+    if (DEBUG) Serial.println("NACK");
+    return false; //NACK
+  } else if ((HEAD == 0x40) && (LEN == 0x05)){
+    //Valid Measurement
+    while (hpmaSerial.available() < 1);
+    byte COMD = hpmaSerial.read();
+    while (hpmaSerial.available() < 1);
+    byte DF1 = hpmaSerial.read(); 
+    while (hpmaSerial.available() < 1);
+    byte DF2 = hpmaSerial.read();     
+    while (hpmaSerial.available() < 1);
+    byte DF3 = hpmaSerial.read();   
+    while (hpmaSerial.available() < 1);
+    byte DF4 = hpmaSerial.read();     
+    while (hpmaSerial.available() < 1);
+    byte CS = hpmaSerial.read();      
+    
+    //Verify Checksum
+    int checksum = (65536 - (HEAD + LEN + COMD + DF1 + DF2 + DF3 + DF4)) % 256;
+
+    if (checksum != CS){
+      if (DEBUG) Serial.println(String(checksum) + "!=" + String(CS));
+      return false;
+    } else {
+      *pm25 = DF1 * 256 + DF2;
+      *pm10 = DF3 * 256 + DF4;
+      return true;
+    }
   }
 }
