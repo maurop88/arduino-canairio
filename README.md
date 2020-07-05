@@ -32,7 +32,7 @@ I am powering the board via USB, and using the `Vin` pin as `Vout` to power the 
 There are 2 .ino files, `esp-canairio.ino` and `esp-canairio-nolib.ino` (the one I am currently using). Both are basically the same but the `esp-canairio-nolib.ino` manually sends commands to the 115s0 sensor instead of using a library (I was having checksum problems).
 
 ### Libraries used
-- [hpma115s0 from Felixgalindo](https://github.com/felixgalindo/HPMA115S0) (only in `esp-canairio.ino`)
+- [hpma115s0 from Electronza](https://github.com/Electronza/HPMA115S0) (only in `esp-canairio.ino`)
 - [DHTesp](https://github.com/beegee-tokyo/DHTesp)
 - [CanAirIoApi](https://github.com/kike-canaries/esp32-hpma115s0/blob/master/lib/canairioapi/src/)
 - ESP8266WiFi
